@@ -39,13 +39,29 @@ localhost only and every request needs a bearer token. Run **Grok Bridge: Copy M
 }
 ```
 
-The same config is written to `<globalStorage>/alidplus.grok-bridge/mcp.json` (readable only by you), so local scripts can find it.
-**Grok Bridge: Regenerate MCP Token** replaces the token; old configs stop working.
+The token is kept in VS Code's SecretStorage (your OS keychain). **Grok Bridge: Regenerate MCP Token** replaces it; old configs stop working.
+If you turn on `grokBridge.mcpWriteConfigFile` (off by default), the config, token included, is also written to
+`<globalStorage>/alidplus.grok-bridge/mcp.json` (folder `700`, file `600`), so local scripts can read it.
+
+> **Security: treat the token like your password.** Anyone with it can run Cursor agents that read and edit files and run
+> shell commands as you. That is full code execution under your user account. Don't paste it into chats, logs or shared configs.
+
+What the server enforces:
+
+- It listens on `127.0.0.1` only and accepts only `Host: 127.0.0.1:<port>`, `localhost:<port>` or `[::1]:<port>`.
+  It refuses any request that carries an `Origin` header, so web pages can't reach it.
+- Agent folders (`cwd`) are resolved with `realpath` and must lie inside an open workspace folder or a folder listed in
+  `grokBridge.allowedRoots`. This applies to `create_agent`, `send_prompt`, `list_agents` and `get_messages`.
+- At most `grokBridge.mcpMaxRuns` (default 3) MCP runs can be in flight at once, `timeout_s` is capped at 1800, and
+  `tools/call` is not allowed inside JSON-RPC batches (batches hold at most 10 messages).
+
+> **Untrusted output.** Whatever `get_messages` and the run results return is text produced by an agent that read your files,
+> web pages and command output. It can contain prompt-injection attempts. A bot should treat it as data, not as instructions.
 
 | Tool | Arguments | What it does |
 | --- | --- | --- |
 | `list_agents` | `cwd?` | Agents for a folder, with `running` flags. |
-| `create_agent` | `prompt`, `model?`, `cwd?`, `wait?`, `timeout_s?` | Starts a new agent. With `wait` (default) it returns the final reply. |
+| `create_agent` | `prompt`, `model?`, `cwd?`, `wait?`, `timeout_s?` (≤ 1800) | Starts a new agent. With `wait` (default) it returns the final reply. |
 | `send_prompt` | `agent_id`, `prompt`, `wait?`, `timeout_s?`, `model?` | Continues an agent's conversation. |
 | `get_messages` | `agent_id` | The conversation as plain text: prompts, replies and tool steps. |
 | `cancel_run` | `agent_id` | Stops the agent's current run. |
@@ -76,7 +92,7 @@ it needs to run on the same computer or use a tunnel you control.
 
 1. Install the extension from a `.vsix` file:
    ```bash
-   cursor --install-extension grok-bridge-0.2.0.vsix
+   cursor --install-extension grok-bridge-0.2.1.vsix
    ```
 2. Log in to the Cursor SDK once, if you haven't already:
    ```bash
@@ -97,6 +113,9 @@ it needs to run on the same computer or use a tunnel you control.
 | `grokBridge.cwd` | *(workspace)* | Override the agents' working folder. |
 | `grokBridge.mcpEnabled` | `true` | Run the local MCP server. |
 | `grokBridge.mcpPort` | `7457` | MCP server port (binds to 127.0.0.1). |
+| `grokBridge.allowedRoots` | `[]` | Extra folders, besides the open workspace folders, where MCP clients may run agents. |
+| `grokBridge.mcpMaxRuns` | `3` | Maximum number of MCP runs in flight at once. |
+| `grokBridge.mcpWriteConfigFile` | `false` | Also write the MCP config, token included, to `<globalStorage>/mcp.json`. |
 | `grokBridge.sdkDir` | *(managed)* | Optional folder whose `node_modules` contains a different `@cursor/sdk`. When it's empty, Grok Bridge uses the SDK it installed itself. |
 
 ## Usage
@@ -105,7 +124,9 @@ it needs to run on the same computer or use a tunnel you control.
 2. Type in the box at the bottom and press **Enter** to start a new agent in the workspace folder.
    Keep typing in the same chat to continue that agent.
 3. Press the **history** (clock) button to see the folder's agents. Click one to open it. Change the **Folder** field and press Enter to list another folder.
-4. Press **+** for a fresh agent. Press the round button (it turns into a square) to stop a running agent.
+4. Press **+** for a fresh agent. To stop a run, press the round button (it turns into a square) or press **Escape**.
+   This works even while a new agent is still starting.
+5. Hover over a code block to show its **Copy** button. Long prompts fold to 8 lines with **Show more**.
 
 Logs and errors go to the **Grok Bridge** output channel (View → Output).
 

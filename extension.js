@@ -109,6 +109,18 @@ function cfg() { return vscode.workspace.getConfiguration("grokBridge"); }
 function defaultCwd() {
   return cfg().get("cwd") || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || os.homedir();
 }
+// MCP callers may only use folders inside an open workspace folder or grokBridge.allowedRoots (symlinks resolved).
+function allowedRoots() {
+  const roots = [...(vscode.workspace.workspaceFolders || []).map((f) => f.uri.fsPath), ...(cfg().get("allowedRoots") || [])];
+  return roots.map((r) => { try { return fs.realpathSync(r); } catch { return null; } }).filter(Boolean);
+}
+function checkCwd(cwd) {
+  let p;
+  try { p = fs.realpathSync(path.resolve(String(cwd).replace(/^~(?=$|[\\/])/, os.homedir()))); } catch { throw new Error(`folder not found: ${cwd}`); }
+  const inside = (r) => { const rel = path.relative(r, p); return rel === "" || (rel.split(path.sep)[0] !== ".." && !path.isAbsolute(rel)); };
+  if (!allowedRoots().some(inside)) throw new Error(`folder ${p} is outside the open workspace folders and grokBridge.allowedRoots`);
+  return p;
+}
 const firstLine = (s, n = 80) => { const l = String(s || "").trim().split("\n")[0]; return l.length > n ? l.slice(0, n - 1) + "…" : l; };
 
 // The hub owns every run (started from the panel or over MCP) and mirrors it to all open webviews.
@@ -118,6 +130,8 @@ class Hub {
     this.views = new Set();
     this.runs = new Map();     // agentId -> live run record
     this.cwds = new Map();     // agentId -> folder it lives in
+    this.tickets = new Map();  // panel ticket -> run record, so Stop works while a new agent is starting
+    this.mcpRuns = 0;          // MCP runs in flight (capped by grokBridge.mcpMaxRuns)
     this.mcpStatus = { state: "off" };
   }
   broadcast(m) { for (const w of this.views) w.postMessage(m); }
@@ -151,6 +165,7 @@ class Hub {
     cwd = agentId ? this.cwdOf(agentId, cwd) : (cwd || defaultCwd());
     model = model || cfg().get("defaultModel") || "grok-4.5";
     const rec = { agentId, cwd, prompt, model, source, ticket, startedAt: Date.now(), events: [], text: "" };
+    if (ticket) this.tickets.set(ticket, rec);
     let ok, fail;
     const started = new Promise((a, b) => { ok = a; fail = b; });
     started.catch(() => {});
@@ -160,6 +175,7 @@ class Hub {
         this.runs.set(ev.agentId, rec); this.cwds.set(ev.agentId, cwd); this.setTitle(ev.agentId, prompt);
         this.log.appendLine(`run ${ev.runId} started on ${ev.agentId} (${source}, ${model})`);
         this.broadcast({ type: "run-start", ticket, run: this.snapshot(rec), title: this.titles()[ev.agentId] });
+        if (rec.cancelRequested) this.cancel(ev.agentId).catch((e) => this.log.appendLine("cancel: " + e.message));
         return ok(rec);
       }
       const last = rec.events[rec.events.length - 1];
@@ -176,6 +192,7 @@ class Hub {
     return { started, done };
   }
   end(rec, result) {
+    if (rec.ticket) this.tickets.delete(rec.ticket);
     if (rec.agentId && this.runs.get(rec.agentId) === rec) this.runs.delete(rec.agentId);
     result.durationMs = result.durationMs || Date.now() - rec.startedAt;
     this.log.appendLine(`run ${rec.runId || "?"} on ${rec.agentId || "new agent"} ended: ${result.status}${result.error ? " " + errText(result.error) : ""}`);
@@ -183,6 +200,12 @@ class Hub {
     this.broadcast({ type: "run-end", ticket: rec.ticket, agentId: rec.agentId, result });
   }
   cancel(agentId) { return this.helper.call("cancel", { agentId }); }
+  cancelTicket(ticket) {
+    const rec = this.tickets.get(ticket);
+    if (!rec) return;
+    if (rec.runId) return this.cancel(rec.agentId);
+    rec.cancelRequested = true; // cancelled as soon as the SDK reports the run
+  }
 }
 
 function errText(e) { return typeof e === "string" ? e : e?.message || (e ? JSON.stringify(e) : ""); }
@@ -200,12 +223,16 @@ function transcript(agentId, turns) {
 }
 
 function mcpHandlers(hub) {
-  const runTool = async (a, source) => {
+  const runTool = async (a) => {
+    const max = Math.max(1, Number(cfg().get("mcpMaxRuns")) || 3);
+    if (hub.mcpRuns >= max) throw new Error(`${hub.mcpRuns} MCP runs are already in flight (grokBridge.mcpMaxRuns = ${max}); wait or cancel_run`);
     const { started, done } = hub.run(a);
+    hub.mcpRuns++;
+    done.catch(() => {}).finally(() => { hub.mcpRuns--; });
     const rec = await started;
     const head = { agent_id: rec.agentId, run_id: rec.runId, model: rec.model, cwd: rec.cwd };
     if (a.wait === false) return { ...head, status: "running", note: "poll get_messages or list_agents for progress" };
-    const ms = Math.max(1, Number(a.timeout_s) || 600) * 1000;
+    const ms = Math.min(1800, Math.max(1, Number(a.timeout_s) || 600)) * 1000;
     let timer;
     const timeout = new Promise((r) => { timer = setTimeout(() => r(null), ms); });
     const r = await Promise.race([done.catch((e) => ({ status: "error", error: { message: e.message } })), timeout]);
@@ -215,18 +242,18 @@ function mcpHandlers(hub) {
   };
   return {
     list_agents: async ({ cwd }) => {
-      const dir = cwd || defaultCwd();
+      const dir = checkCwd(cwd || defaultCwd());
       const items = await hub.list(dir);
       return { cwd: dir, agents: items.map((a) => ({ agent_id: a.agentId, title: a.title || a.summary || a.name, status: a.status, running: a.running, last_modified: a.lastModified ? new Date(a.lastModified).toISOString() : undefined })) };
     },
-    create_agent: ({ prompt, model, cwd, wait, timeout_s }) => runTool({ prompt, model, cwd, wait, timeout_s, source: "mcp" }),
+    create_agent: ({ prompt, model, cwd, wait, timeout_s }) => runTool({ prompt, model, cwd: checkCwd(cwd || defaultCwd()), wait, timeout_s, source: "mcp" }),
     send_prompt: ({ agent_id, prompt, model, cwd, wait, timeout_s }) => {
       if (!agent_id) throw new Error("agent_id is required");
-      return runTool({ agentId: agent_id, prompt, model, cwd, wait, timeout_s, source: "mcp" });
+      return runTool({ agentId: agent_id, prompt, model, cwd: checkCwd(hub.cwdOf(agent_id, cwd)), wait, timeout_s, source: "mcp" });
     },
     get_messages: async ({ agent_id, cwd }) => {
       if (!agent_id) throw new Error("agent_id is required");
-      const text = transcript(agent_id, await hub.messages(agent_id, cwd));
+      const text = transcript(agent_id, await hub.messages(agent_id, checkCwd(hub.cwdOf(agent_id, cwd))));
       const live = hub.runs.get(agent_id);
       return live ? `${text}\n\n(run ${live.runId} is still in progress)` : text;
     },
@@ -234,21 +261,31 @@ function mcpHandlers(hub) {
   };
 }
 
-function mcpToken(ctx) {
-  let t = ctx.globalState.get("mcpToken");
-  if (!t) { t = crypto.randomBytes(24).toString("base64url"); ctx.globalState.update("mcpToken", t); }
+const newToken = () => crypto.randomBytes(24).toString("base64url");
+// The token lives in SecretStorage (OS keychain). 0.2.0 kept it in globalState: migrate it once and drop the old key.
+async function mcpToken(ctx) {
+  let t = await ctx.secrets.get("mcpToken");
+  const old = ctx.globalState.get("mcpToken");
+  if (old !== undefined) {
+    if (!t && old) { t = old; await ctx.secrets.store("mcpToken", t); }
+    await ctx.globalState.update("mcpToken", undefined);
+  }
+  if (!t) { t = newToken(); await ctx.secrets.store("mcpToken", t); }
   return t;
 }
-function mcpConfig(ctx) {
-  return { mcpServers: { "grok-bridge": { url: `http://127.0.0.1:${cfg().get("mcpPort") || 7457}/mcp`, headers: { Authorization: `Bearer ${mcpToken(ctx)}` } } } };
+async function mcpConfig(ctx) {
+  return { mcpServers: { "grok-bridge": { url: `http://127.0.0.1:${cfg().get("mcpPort") || 7457}/mcp`, headers: { Authorization: `Bearer ${await mcpToken(ctx)}` } } } };
 }
-// Also written to <globalStorage>/mcp.json (mode 600) so local scripts and bots on this machine can pick it up.
-function writeMcpFile(ctx) {
+// Opt-in (grokBridge.mcpWriteConfigFile): write <globalStorage>/mcp.json for local scripts. Dir 700, file 600, atomic rename.
+// When the setting is off, a file left by an earlier version is removed.
+async function syncMcpFile(ctx) {
+  const dir = ctx.globalStorageUri.fsPath, file = path.join(dir, "mcp.json");
+  if (!cfg().get("mcpWriteConfigFile")) { try { fs.unlinkSync(file); } catch {} return null; }
   try {
-    const dir = ctx.globalStorageUri.fsPath; fs.mkdirSync(dir, { recursive: true });
-    const file = path.join(dir, "mcp.json");
-    fs.writeFileSync(file, JSON.stringify(mcpConfig(ctx), null, 2) + "\n", { mode: 0o600 });
-    fs.chmodSync(file, 0o600);
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); fs.chmodSync(dir, 0o700);
+    const tmp = path.join(dir, `.mcp-${crypto.randomBytes(6).toString("hex")}.tmp`);
+    fs.writeFileSync(tmp, JSON.stringify(await mcpConfig(ctx), null, 2) + "\n", { mode: 0o600, flag: "wx" });
+    fs.renameSync(tmp, file);
     return file;
   } catch { return null; }
 }
@@ -280,7 +317,9 @@ function attach(webview, ctx, hub, log) {
         const { started } = hub.run({ cwd: m.cwd, prompt: m.prompt, agentId: m.agentId || null, model: m.model, source: "panel", ticket: m.ticket });
         await started; // run-start / run-event / run-end are broadcast by the hub
       } else if (m.type === "cancel") {
-        await hub.cancel(m.agentId);
+        if (m.agentId) await hub.cancel(m.agentId); else if (m.ticket) await hub.cancelTicket(m.ticket);
+      } else if (m.type === "copy" && typeof m.text === "string") {
+        await vscode.env.clipboard.writeText(m.text);
       } else if (m.type === "open" && /^(https?:|mailto:)/.test(m.url || "")) {
         vscode.env.openExternal(vscode.Uri.parse(m.url));
       } else if (m.type === "command") {
@@ -307,12 +346,13 @@ function activate(ctx) {
     const port = cfg().get("mcpPort") || 7457;
     if (!cfg().get("mcpEnabled")) { hub.mcpStatus = { state: "off" }; }
     else {
-      const server = new McpServer({ token: mcpToken(ctx), handlers: mcpHandlers(hub), version: ctx.extension.packageJSON.version, log: (l) => log.appendLine(l) });
+      const server = new McpServer({ token: await mcpToken(ctx), handlers: mcpHandlers(hub), version: ctx.extension.packageJSON.version, log: (l) => log.appendLine(l) });
       try {
         await server.listen(port);
         mcp = server;
         hub.mcpStatus = { state: "on", url: `http://127.0.0.1:${port}/mcp` };
-        log.appendLine(`MCP server listening on http://127.0.0.1:${port}/mcp (config: ${writeMcpFile(ctx) || "not written"})`);
+        const file = await syncMcpFile(ctx);
+        log.appendLine(`MCP server listening on http://127.0.0.1:${port}/mcp${file ? ` (config written to ${file})` : ""}`);
       } catch (e) {
         hub.mcpStatus = { state: "error", error: e.code === "EADDRINUSE" ? `port ${port} is in use (another Cursor window may own it)` : e.message };
         log.appendLine("MCP server not started: " + hub.mcpStatus.error);
@@ -323,7 +363,7 @@ function activate(ctx) {
   startMcp();
   ctx.subscriptions.push({ dispose: () => mcp && mcp.close() });
   ctx.subscriptions.push(vscode.workspace.onDidChangeConfiguration((e) => {
-    if (e.affectsConfiguration("grokBridge.mcpPort") || e.affectsConfiguration("grokBridge.mcpEnabled")) startMcp();
+    if (["mcpPort", "mcpEnabled", "mcpWriteConfigFile"].some((k) => e.affectsConfiguration("grokBridge." + k))) startMcp();
   }));
 
   ctx.subscriptions.push(vscode.window.registerWebviewViewProvider("grokBridge.view", {
@@ -339,14 +379,14 @@ function activate(ctx) {
   }));
 
   ctx.subscriptions.push(vscode.commands.registerCommand("grokBridge.copyMcpConfig", async () => {
-    await vscode.env.clipboard.writeText(JSON.stringify(mcpConfig(ctx), null, 2));
+    await vscode.env.clipboard.writeText(JSON.stringify(await mcpConfig(ctx), null, 2));
     const s = hub.mcpStatus;
     vscode.window.showInformationMessage(s.state === "on" ? `Grok Bridge: MCP config copied (${s.url}). Give it to your Grok Bot.`
       : `Grok Bridge: MCP config copied, but the server is ${s.state}${s.error ? ": " + s.error : ""}.`);
   }));
 
   ctx.subscriptions.push(vscode.commands.registerCommand("grokBridge.regenerateMcpToken", async () => {
-    await ctx.globalState.update("mcpToken", crypto.randomBytes(24).toString("base64url"));
+    await ctx.secrets.store("mcpToken", newToken());
     await startMcp();
     vscode.window.showInformationMessage("Grok Bridge: new MCP token created. Old configs stop working; run \"Copy MCP Config\" again.");
   }));

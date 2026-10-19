@@ -23,9 +23,9 @@ const TOOLS = [
       properties: {
         prompt: str("What the agent should do."),
         model: str("Model id, e.g. grok-4.5. Default: the grokBridge.defaultModel setting."),
-        cwd: str("Folder the agent works in. Default: the Cursor workspace folder."),
+        cwd: str("Folder the agent works in; must be inside an open workspace folder or grokBridge.allowedRoots. Default: the workspace folder."),
         wait: { type: "boolean", description: "Wait for the run to finish (default true).", default: true },
-        timeout_s: { type: "number", description: "Max seconds to wait when wait=true (default 600)." },
+        timeout_s: { type: "number", description: "Max seconds to wait when wait=true (default 600, max 1800)." },
       },
     },
   },
@@ -38,7 +38,7 @@ const TOOLS = [
         agent_id: str("Agent id from list_agents or create_agent."),
         prompt: str("The message."),
         wait: { type: "boolean", description: "Wait for the run to finish (default true).", default: true },
-        timeout_s: { type: "number", description: "Max seconds to wait when wait=true (default 600)." },
+        timeout_s: { type: "number", description: "Max seconds to wait when wait=true (default 600, max 1800)." },
         model: str("Optional model id for this run."),
         cwd: str("Agent folder, only needed if the agent was not created or listed in this session."),
       },
@@ -57,7 +57,7 @@ const TOOLS = [
 ];
 
 const rpcError = (id, code, message) => ({ jsonrpc: "2.0", id: id ?? null, error: { code, message } });
-const isLocalOrigin = (o) => { try { return ["127.0.0.1", "localhost", "[::1]"].includes(new URL(o).hostname); } catch { return false; } };
+const MAX_BATCH = 10;
 
 class McpServer {
   // handlers: { [toolName]: async (args) => any }  (a string result is sent as-is, anything else as JSON)
@@ -66,8 +66,8 @@ class McpServer {
   listen(port, host = "127.0.0.1") {
     return new Promise((resolve, reject) => {
       const server = http.createServer((req, res) => this.onRequest(req, res).catch((e) => {
-        this.log("mcp: " + e.message);
-        if (!res.headersSent) this.send(res, 500, rpcError(null, -32603, e.message));
+        this.log("mcp: internal error: " + (e && e.stack || e));
+        if (!res.headersSent) this.send(res, 500, rpcError(null, -32603, "internal error"));
       }));
       server.requestTimeout = 0; // tool calls with wait=true can take minutes
       server.headersTimeout = 30000;
@@ -93,8 +93,12 @@ class McpServer {
   async onRequest(req, res) {
     const url = new URL(req.url, "http://localhost");
     if (url.pathname !== "/mcp") return this.send(res, 404, { error: "not found; the MCP endpoint is /mcp" });
-    // Browsers always send Origin; refuse non-local pages (DNS rebinding). CLI/bot clients send none.
-    if (req.headers.origin && !isLocalOrigin(req.headers.origin)) return this.send(res, 403, { error: "origin not allowed" });
+    // DNS rebinding / browser defence: only exact loopback Host headers, and no browser requests at all
+    // (browsers always send Origin on cross-origin POSTs; CLI and bot clients send none).
+    const port = this.server && this.server.address().port;
+    const hosts = [`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`];
+    if (!hosts.includes(String(req.headers.host || "").toLowerCase())) return this.send(res, 403, { error: "host not allowed" });
+    if (req.headers.origin !== undefined) return this.send(res, 403, { error: "browser requests are not allowed" });
     if (!this.authorized(req)) return this.send(res, 401, { error: "missing or wrong bearer token" }, { "WWW-Authenticate": "Bearer" });
     if (req.method !== "POST") return this.send(res, 405, { error: "only POST is supported (no SSE stream)" }, { Allow: "POST" });
 
@@ -104,6 +108,8 @@ class McpServer {
     try { msg = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { return this.send(res, 400, rpcError(null, -32700, "parse error")); }
 
     const batch = Array.isArray(msg);
+    if (batch && (msg.length === 0 || msg.length > MAX_BATCH)) return this.send(res, 400, rpcError(null, -32600, `batches must have 1-${MAX_BATCH} messages`));
+    if (batch && msg.some((m) => m && m.method === "tools/call")) return this.send(res, 400, rpcError(null, -32600, "tools/call is not allowed in a batch; send one call per request"));
     const replies = (await Promise.all((batch ? msg : [msg]).map((m) => this.dispatch(m)))).filter(Boolean);
     if (!replies.length) return this.send(res, 202, null); // only notifications / responses
     this.send(res, 200, batch ? replies : replies[0]);

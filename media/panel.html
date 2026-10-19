@@ -17,7 +17,7 @@
 </header>
 
 <main id="chat" class="view">
-  <div id="conv" class="conv" aria-live="polite"></div>
+  <div id="conv" class="conv"></div>
   <div id="empty" class="empty">
     <div class="empty-title">Start a Cursor agent</div>
     <p>It works in <code id="emptyCwd">this folder</code> with full file and terminal access.</p>
@@ -35,6 +35,7 @@
 </main>
 
 <div id="notice" class="notice" hidden></div>
+<div id="sr" class="sr-only" role="status" aria-live="polite"></div>
 
 <form id="composer" class="composer">
   <textarea id="prompt" rows="1" placeholder="Ask the agent to build, fix or explain…" aria-label="Prompt"></textarea>

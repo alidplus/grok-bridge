@@ -2,7 +2,7 @@
   "name": "grok-bridge",
   "displayName": "Grok Bridge",
   "description": "Unofficial community bridge between Grok Bots and Cursor agents: chat with Cursor SDK agents in a Cursor-style panel, and let Grok Bots drive them over MCP.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "publisher": "alidplus",
   "license": "MIT",
   "repository": {
@@ -103,6 +103,25 @@
           "minimum": 1024,
           "maximum": 65535,
           "description": "Port of the local MCP server. It binds to 127.0.0.1 only."
+        },
+        "grokBridge.allowedRoots": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Extra folders (besides the open workspace folders) that MCP clients may run agents in. Subfolders are included; symlinks are resolved."
+        },
+        "grokBridge.mcpMaxRuns": {
+          "type": "number",
+          "default": 3,
+          "minimum": 1,
+          "description": "Maximum number of agent runs MCP clients can have in flight at once."
+        },
+        "grokBridge.mcpWriteConfigFile": {
+          "type": "boolean",
+          "default": false,
+          "description": "Also write the MCP config, including the token, to <globalStorage>/mcp.json (mode 600) so local scripts can read it. Off by default."
         }
       }
     },

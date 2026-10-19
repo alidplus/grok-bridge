@@ -1,6 +1,6 @@
 // Runs extension.js outside Cursor with a minimal fake `vscode` module, so the MCP server, the hub and the
 // real helper/SDK can be tested with curl. A fake webview logs what the panel would receive.
-//   node test/host.js [--cwd DIR] [--port 7457]      then: cat .test-storage/mcp.json
+//   node test/host.js [--cwd DIR] [--port 7457] [--max-runs 3]      then: cat .test-storage/mcp.json
 const Module = require("module");
 const path = require("path");
 const fs = require("fs");
@@ -10,9 +10,10 @@ const opt = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] :
 const root = path.dirname(__dirname);
 const cursorStorage = path.join(os.homedir(), ".config/Cursor/User/globalStorage/alidplus.grok-bridge");
 const storage = path.join(root, ".test-storage");
-const settings = { cwd: opt("--cwd", ""), mcpPort: Number(opt("--port", 7457)), mcpEnabled: true, defaultModel: "grok-4.5", nodePath: "",
+const settings = { cwd: opt("--cwd", ""), mcpPort: Number(opt("--port", 7457)), mcpEnabled: true, mcpWriteConfigFile: true, mcpMaxRuns: Number(opt("--max-runs", 3)), allowedRoots: [], defaultModel: "grok-4.5", nodePath: "",
   sdkDir: fs.existsSync(path.join(cursorStorage, "sdk")) ? path.join(cursorStorage, "sdk") : "" };
-const state = new Map();
+const state = new Map([["mcpToken", "legacy-token-from-0.2.0"]]); // exercises the globalState -> secrets migration
+const secrets = new Map();
 const Uri = { file: (p) => ({ fsPath: p, toString: () => "file://" + p }), joinPath: (u, ...p) => Uri.file(path.join(u.fsPath, ...p)), parse: (s) => ({ toString: () => s }) };
 const noop = () => ({ dispose() {} });
 const vscode = {
@@ -54,6 +55,9 @@ const ext = require(path.join(root, "extension.js"));
 ext.activate({
   extensionPath: root, extensionUri: Uri.file(root), globalStorageUri: Uri.file(storage), subscriptions: [],
   extension: { packageJSON: require(path.join(root, "package.json")) },
+  secrets: { get: async (k) => secrets.get(k), store: async (k, v) => { secrets.set(k, v); }, delete: async (k) => { secrets.delete(k); } },
   globalState: { get: (k, d) => (state.has(k) ? state.get(k) : d), update: async (k, v) => { state.set(k, v); } },
 });
-setTimeout(async () => { await commands["grokBridge.copyMcpConfig"](); console.log("[clipboard]", clipboard.replace(/Bearer [^"]+/, "Bearer <token>")); }, 500);
+setTimeout(async () => {
+  console.log(`[migration] secrets has token: ${secrets.get("mcpToken") === "legacy-token-from-0.2.0"}, globalState key left: ${state.get("mcpToken") !== undefined}`);
+  await commands["grokBridge.copyMcpConfig"](); console.log("[clipboard]", clipboard.replace(/Bearer [^"]+/, "Bearer <token>")); }, 500);

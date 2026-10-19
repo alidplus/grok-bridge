@@ -1,7 +1,6 @@
 // Grok Bridge webview: a Cursor-style agent chat. Talks to extension.js with postMessage.
 const vscode = acquireVsCodeApi();
 const $ = (id) => document.getElementById(id);
-const FALLBACK_MODELS = [{ id: "grok-4.5", name: "Grok 4.5" }, { id: "grok-4.6", name: "Grok 4.6" }, { id: "grok-4.7", name: "Grok 4.7" }];
 
 const S = {
   cwd: "", model: "grok-4.5", view: "chat",
@@ -65,7 +64,7 @@ function md(src) {
       const buf = []; i++;
       while (i < lines.length && !lines[i].trim().startsWith(f[1])) buf.push(lines[i++]);
       i++;
-      out.push(`<pre${f[2] ? ` data-lang="${esc(f[2])}"` : ""}><code>${esc(buf.join("\n"))}</code></pre>`);
+      out.push(`<pre${f[2] ? ` data-lang="${esc(f[2])}"` : ""}><button class="copy" type="button" title="Copy code" aria-label="Copy code">Copy</button><code>${esc(buf.join("\n"))}</code></pre>`);
       continue;
     }
     if (!l.trim()) { i++; continue; }
@@ -130,9 +129,15 @@ function scrollDown(force) { if (force || stick) requestAnimationFrame(() => { c
 function makeTurn(userText, opts = {}) {
   const t = { el: el("div", "turn"), group: null, textEl: null, textBuf: "", startedAt: opts.startedAt || Date.now(), timer: null };
   if (opts.source === "mcp") t.el.append(el("div", "source", "Sent by a Grok Bot over MCP"));
-  const u = el("div", "user md-inline");
-  u.innerHTML = String(userText || "").split("\n").map(inline).join("<br>"); // inline() escapes everything first
+  const text = String(userText || "");
+  const u = el("div", "user", text); // plain text, white-space: pre-wrap
   t.el.append(u);
+  if (text.split("\n").length > 8 || text.length > 700) {
+    u.classList.add("clamped");
+    const more = el("button", "more", "Show more"); more.type = "button";
+    more.onclick = () => { const c = u.classList.toggle("clamped"); more.textContent = c ? "Show more" : "Show less"; };
+    t.el.append(more);
+  }
   t.meta = el("div", "meta"); t.meta.hidden = true;
   t.el.append(t.meta);
   t.body = el("div", "body");
@@ -141,19 +146,24 @@ function makeTurn(userText, opts = {}) {
   return t;
 }
 function setMeta(t, html, cls) { t.meta.hidden = false; t.meta.className = "meta" + (cls ? " " + cls : ""); t.meta.innerHTML = html; }
-function startWorking(t) {
-  const tick = () => setMeta(t, `<span class="spinner"></span><span>Working · ${dur(Date.now() - t.startedAt)}</span>`);
+function startWorking(t, phase) {
+  t.phase = phase || "Working";
+  const tick = () => setMeta(t, `<span class="spinner"></span><span>${t.phase === "Working" ? `Working · ${dur(Date.now() - t.startedAt)}` : t.phase}</span>`);
   tick(); t.timer = setInterval(tick, 1000);
 }
 function finishTurn(t, r = {}) {
   clearInterval(t.timer); t.timer = null;
   const ms = r.durationMs || Date.now() - t.startedAt;
   const st = r.status && !/finished|completed/i.test(r.status) ? ` · ${esc(String(r.status).toLowerCase())}` : "";
-  setMeta(t, `Worked for ${dur(ms)}${st}`);
   const err = r.error && (r.error.message || r.error.code || (typeof r.error === "string" ? r.error : JSON.stringify(r.error)));
+  const bad = !!err || /error|fail|cancel/i.test(r.status || "");
+  setMeta(t, `Worked for ${dur(ms)}${st}`, bad ? "err" : "");
+  announce(/cancel/i.test(r.status || "") ? "Agent stopped" : bad ? "Agent run failed" : "Agent finished replying");
   if (err) showError(t, err);
   t.group && updateGroup(t.group, true);
 }
+let announceTimer;
+function announce(text) { const sr = $("sr"); sr.textContent = ""; clearTimeout(announceTimer); announceTimer = setTimeout(() => { sr.textContent = text; }, 50); }
 function showError(t, msg) { const b = el("div", "error-box", msg); (t ? t.body : conv).append(b); scrollDown(); }
 
 let renderQueued = new Set();
@@ -233,13 +243,14 @@ function showLive(run) {
 // ---------- views ----------
 function setTitle(text) { S.title = text || "New Agent"; $("title").textContent = S.view === "history" ? "History" : S.title; $("title").title = S.title; }
 function updateEmpty() { $("empty").hidden = S.agentId != null || !!S.pending || conv.childElementCount > 0; $("emptyCwd").textContent = base(S.cwd) || "this folder"; $("emptyCwd").title = S.cwd; }
+const isRunning = () => (S.agentId ? S.runs.has(S.agentId) : !!S.pending);
 function updateComposer() {
-  const running = S.agentId ? S.runs.has(S.agentId) : !!S.pending;
+  const running = isRunning();
   const btn = $("send");
   btn.classList.toggle("stop", running);
   btn.title = running ? "Stop" : "Send (Enter)";
   btn.setAttribute("aria-label", running ? "Stop" : "Send");
-  btn.disabled = running ? !S.agentId : !$("prompt").value.trim();
+  btn.disabled = running ? false : !$("prompt").value.trim();
   $("liveDot").hidden = !running || S.view !== "chat";
   $("hint").textContent = running ? "" : S.agentId ? "" : `New agent in ${base(S.cwd)}`;
 }
@@ -315,7 +326,7 @@ function send() {
   if (S.agentId ? S.runs.has(S.agentId) : S.pending) return;
   const ticket = Math.random().toString(36).slice(2);
   const t = makeTurn(text, { startedAt: Date.now() });
-  startWorking(t);
+  startWorking(t, S.agentId ? "Working" : "Starting…");
   S.live = t;
   if (!S.agentId) { S.pending = { ticket, turn: t }; setTitle(short(text, 60)); }
   else S.runs.set(S.agentId, { agentId: S.agentId, prompt: text, startedAt: Date.now(), events: [], ticket });
@@ -323,11 +334,18 @@ function send() {
   vscode.postMessage({ type: "send", ticket, cwd: S.cwd, prompt: text, agentId: S.agentId, model: $("model").value || S.model });
   prompt.value = ""; autosize(); scrollDown(true); updateComposer();
 }
+function stop() {
+  if (!isRunning()) return;
+  if (S.pending) vscode.postMessage({ type: "cancel", ticket: S.pending.ticket }); // new agent still starting
+  else vscode.postMessage({ type: "cancel", agentId: S.agentId });
+  if (S.live) S.live.phase = "Stopping…";
+}
 $("composer").addEventListener("submit", (e) => {
   e.preventDefault();
-  if ($("send").classList.contains("stop")) { if (S.agentId) vscode.postMessage({ type: "cancel", agentId: S.agentId }); return; }
+  if ($("send").classList.contains("stop")) return stop();
   send();
 });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && S.view === "chat" && isRunning()) { e.preventDefault(); stop(); } });
 prompt.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); }
 });
@@ -355,6 +373,12 @@ $("cwd").addEventListener("keydown", (e) => {
   refresh();
 });
 document.addEventListener("click", (e) => {
+  const c = e.target.closest && e.target.closest(".copy");
+  if (c) {
+    vscode.postMessage({ type: "copy", text: c.nextElementSibling ? c.nextElementSibling.textContent : "" });
+    c.textContent = "Copied"; setTimeout(() => { c.textContent = "Copy"; }, 1200);
+    return;
+  }
   const a = e.target.closest && e.target.closest("a[href]");
   if (a) { e.preventDefault(); vscode.postMessage({ type: "open", url: a.getAttribute("href") }); }
 });
@@ -364,7 +388,7 @@ window.addEventListener("message", ({ data: m }) => {
   if (m.type === "init") {
     S.cwd = m.cwd || ""; S.model = m.model || "grok-4.5"; S.titles = m.titles || {};
     for (const r of m.runs || []) S.runs.set(r.agentId, r);
-    fillModels(FALLBACK_MODELS); renderMcp(m.mcp); newChat();
+    fillModels([{ id: S.model, name: S.model }]); renderMcp(m.mcp); newChat();
   } else if (m.type === "models") {
     if (m.models?.length) fillModels(m.models);
   } else if (m.type === "mcp") {
@@ -388,12 +412,16 @@ window.addEventListener("message", ({ data: m }) => {
     if (m.title) S.titles[r.agentId] = m.title;
     if (S.pending && S.pending.ticket === m.ticket) {
       S.agentId = r.agentId; S.pending = null;
+      if (S.live && S.live.phase === "Starting…") S.live.phase = "Working";
+      announce("Agent is replying");
     } else if (S.agentId === r.agentId && !S.live) {
-      showLive(r);
+      showLive(r); announce("Agent is replying");
     } else if (S.agentId === r.agentId && S.live && r.source !== "panel") {
-      S.live = showLive(r); // a bot continued the agent we are looking at
+      S.live = showLive(r); announce("Agent is replying"); // a bot continued the agent we are looking at
+    } else if (S.agentId === r.agentId && S.live) {
+      announce("Agent is replying");
     } else if (S.agentId == null && !S.pending && conv.childElementCount === 0 && S.view === "chat") {
-      S.agentId = r.agentId; setTitle(m.title || short(r.prompt, 60)); updateEmpty(); showLive(r); // follow a bot's new agent
+      S.agentId = r.agentId; setTitle(m.title || short(r.prompt, 60)); updateEmpty(); showLive(r); announce("Agent is replying"); // follow a bot's new agent
     } else if (r.source === "mcp") {
       notice(`A Grok Bot is running “${short(m.title || r.prompt, 50)}”`, r.agentId);
     }
@@ -411,8 +439,12 @@ window.addEventListener("message", ({ data: m }) => {
     updateComposer(); refresh();
   } else if (m.type === "error") {
     if (m.op === "send") {
-      if (S.pending && S.pending.ticket === m.ticket) S.pending = null;
-      if (S.agentId) S.runs.delete(S.agentId);
+      // Only touch the chat this send came from; a stale error must not clear another run.
+      const pending = S.pending && S.pending.ticket === m.ticket;
+      const cont = S.agentId && S.runs.get(S.agentId)?.ticket === m.ticket;
+      if (!pending && !cont) return;
+      if (pending) S.pending = null;
+      if (cont) S.runs.delete(S.agentId);
       if (S.live) { finishTurn(S.live, { status: "error", error: m.error }); S.live = null; }
       else showError(null, m.error);
       updateComposer();
