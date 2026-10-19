@@ -71,4 +71,4 @@ and streams events back to the webview.
 
 ## License
 
-[MIT](LICENSE) © 2026 Ali Ghorbani. "Cursor" and "Grok" are trademarks of their respective owners.
+MIT © 2026 Ali Ghorbani (see the LICENSE file). "Cursor" and "Grok" are trademarks of their respective owners.
