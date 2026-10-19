@@ -3,78 +3,104 @@ const cp = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
-
-const MIN_NODE = [22, 13];
-function nodeVersionOk(bin) {
-  try {
-    const v = cp.execFileSync(bin, ["-v"], { encoding: "utf8", timeout: 5000 }).trim().replace(/^v/, "").split(".").map(Number);
-    return v[0] > MIN_NODE[0] || (v[0] === MIN_NODE[0] && v[1] >= MIN_NODE[1]) ? "v" + v.join(".") : null;
-  } catch { return null; }
-}
-// Find a Node >= 22.13: explicit setting, then PATH, then common version-manager locations.
-function resolveNode(log) {
-  const configured = vscode.workspace.getConfiguration("grokBridge").get("nodePath");
-  if (configured) return configured;
-  const home = os.homedir();
-  const cands = ["node", "/usr/local/bin/node", "/opt/homebrew/bin/node", "/usr/bin/node", path.join(home, ".volta/bin/node")];
-  for (const base of [path.join(home, ".nvm/versions/node"), path.join(home, ".local/share/fnm/node-versions")]) {
-    try {
-      for (const d of fs.readdirSync(base).sort().reverse()) {
-        cands.push(path.join(base, d, "bin/node"), path.join(base, d, "installation/bin/node"));
-      }
-    } catch {}
-  }
-  for (const c of cands) {
-    if (c !== "node" && !fs.existsSync(c)) continue;
-    const v = nodeVersionOk(c);
-    if (v) { log.appendLine(`using node ${v} at ${c}`); return c; }
-  }
-  throw new Error("No Node >= 22.13 found. Install it or set grokBridge.nodePath.");
-}
+const installer = require("./sdk-installer");
 
 class Helper {
   constructor(ctx, log) { this.ctx = ctx; this.log = log; this.proc = null; this.seq = 0; this.waiters = new Map(); }
-  start() {
+  // Resolve Node, make sure the SDK is installed (or an override is set), then spawn the helper.
+  async start() {
     if (this.proc) return;
-    const cfg = vscode.workspace.getConfiguration("grokBridge");
-    const node = resolveNode(this.log);
-    const helper = path.join(this.ctx.extensionPath, "helper.mjs");
-    const env = { ...process.env, NODE_NO_WARNINGS: "1" };
-    if (cfg.get("sdkDir")) env.GROK_BRIDGE_SDK_DIR = cfg.get("sdkDir");
-    this.log.appendLine(`starting helper: ${node} ${helper}`);
-    this.proc = cp.spawn(node, [helper], { env, stdio: ["pipe", "pipe", "pipe"] });
+    if (this.starting) return this.starting;
+    this.starting = (async () => {
+      const cfg = vscode.workspace.getConfiguration("grokBridge");
+      const node = installer.resolveNode(cfg.get("nodePath"), (l) => this.log.appendLine(l));
+      const env = { ...process.env, NODE_NO_WARNINGS: "1" };
+      const override = cfg.get("sdkDir");
+      if (override) {
+        env.GROK_BRIDGE_SDK_DIR = override;
+        this.log.appendLine(`using SDK override from grokBridge.sdkDir: ${override}`);
+      } else {
+        const sdk = await ensureSdkWithProgress(this.ctx, node.path, this.log, false);
+        env.GROK_BRIDGE_SDK_DIR = sdk.dir;
+      }
+      const helper = path.join(this.ctx.extensionPath, "helper.mjs");
+      this.log.appendLine(`starting helper: ${node.path} ${helper}`);
+      this.spawn(node.path, helper, env);
+    })();
+    try { await this.starting; } finally { this.starting = null; }
+  }
+  spawn(node, helper, env) {
+    const proc = cp.spawn(node, [helper], { env, stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+    this.proc = proc;
     let buf = "";
-    this.proc.stdout.on("data", (d) => {
+    proc.stdout.on("data", (d) => {
       buf += d.toString();
       let i;
       while ((i = buf.indexOf("\n")) >= 0) {
         const line = buf.slice(0, i); buf = buf.slice(i + 1);
         if (!line.trim()) continue;
         let msg; try { msg = JSON.parse(line); } catch { this.log.appendLine("helper: " + line); continue; }
+        if (msg.type === "fatal") { this.fatal = msg.error; this.log.appendLine("helper fatal: " + msg.error); continue; }
         const w = this.waiters.get(msg.id);
         if (!w) continue;
         if (msg.type === "event") w.onEvent && w.onEvent(msg.event);
         else { this.waiters.delete(msg.id); msg.type === "error" ? w.reject(new Error(msg.error)) : w.resolve(msg.data); }
       }
     });
-    this.proc.stderr.on("data", (d) => this.log.appendLine("helper stderr: " + d.toString().trim()));
-    const fail = (why) => {
+    proc.stderr.on("data", (d) => this.log.appendLine("helper stderr: " + d.toString().trim()));
+    const fail = (code) => {
+      const why = this.fatal ? `${this.fatal} (${code}). Try "Grok Bridge: Reinstall SDK".` : code;
+      this.fatal = null;
       this.log.appendLine("helper exited: " + why);
       for (const w of this.waiters.values()) w.reject(new Error("helper exited: " + why));
-      this.waiters.clear(); this.proc = null;
+      this.waiters.clear();
+      if (this.proc === proc) this.proc = null;
     };
-    this.proc.on("exit", (c, s) => fail(`code=${c} signal=${s}`));
-    this.proc.on("error", (e) => fail(e.message));
+    proc.on("exit", (c, s) => fail(`code=${c} signal=${s}`));
+    proc.on("error", (e) => fail(e.message));
   }
   call(cmd, args = {}, onEvent) {
     const id = ++this.seq;
     return new Promise((resolve, reject) => {
-      try { this.start(); } catch (e) { return reject(e); }
-      this.waiters.set(id, { resolve, reject, onEvent });
-      this.proc.stdin.write(JSON.stringify({ id, cmd, ...args }) + "\n");
+      this.start().then(() => {
+        this.waiters.set(id, { resolve, reject, onEvent });
+        this.proc.stdin.write(JSON.stringify({ id, cmd, ...args }) + "\n");
+      }, reject);
     });
   }
-  dispose() { if (this.proc) this.proc.kill(); }
+  stop() { if (this.proc) { this.proc.kill(); this.proc = null; } }
+  dispose() { this.stop(); }
+}
+
+let installing = null;
+async function ensureSdkWithProgress(ctx, nodePath, log, force) {
+  if (installing) return installing;
+  const storageDir = ctx.globalStorageUri.fsPath;
+  const have = installer.installedVersion(installer.sdkHome(storageDir));
+  if (!force && have === installer.SDK_VERSION) return { dir: installer.sdkHome(storageDir), version: have, installed: false };
+  installing = Promise.resolve(vscode.window.withProgress(
+    { location: vscode.ProgressLocation.Notification, title: `Grok Bridge: installing ${installer.SDK_PACKAGE}@${installer.SDK_VERSION}`, cancellable: false },
+    async (progress) => {
+      try {
+        const r = await installer.ensureSdk({ storageDir, nodePath, force, log: (l) => log.appendLine(l), onProgress: (m) => progress.report({ message: m }) });
+        vscode.window.showInformationMessage(`Grok Bridge: ${installer.SDK_PACKAGE}@${r.version} installed.`);
+        return r;
+      } catch (e) {
+        log.appendLine("SDK install failed: " + e.message);
+        throw new Error(`Installing ${installer.SDK_PACKAGE}@${installer.SDK_VERSION} failed: ${e.message}`);
+      }
+    })).finally(() => { installing = null; });
+  return installing;
+}
+
+function reportError(e, log) {
+  const msg = e && e.message ? e.message : String(e);
+  const actions = /Node/.test(msg) ? ["Open Settings", "Show Log"] : ["Reinstall SDK", "Show Log"];
+  vscode.window.showErrorMessage(`Grok Bridge: ${msg}`, ...actions).then((a) => {
+    if (a === "Show Log") log.show();
+    else if (a === "Open Settings") vscode.commands.executeCommand("workbench.action.openSettings", "grokBridge.nodePath");
+    else if (a === "Reinstall SDK") vscode.commands.executeCommand("grokBridge.reinstallSdk");
+  });
 }
 
 function defaultCwd() {
@@ -107,6 +133,7 @@ function attach(webview, ctx, helper, log) {
     } catch (e) {
       log.appendLine(`error (${m.type}): ${e.message}`);
       post({ type: "error", op: m.type, error: e.message });
+      if (!helper.proc) reportError(e, log); // startup problem (Node / SDK), not a run error
     }
   });
 }
@@ -124,6 +151,14 @@ function activate(ctx) {
     const panel = vscode.window.createWebviewPanel("grokBridge.panel", "Grok Bridge", vscode.ViewColumn.Active,
       { enableScripts: true, retainContextWhenHidden: true });
     attach(panel.webview, ctx, helper, log);
+  }));
+
+  ctx.subscriptions.push(vscode.commands.registerCommand("grokBridge.reinstallSdk", async () => {
+    try {
+      helper.stop();
+      const node = installer.resolveNode(vscode.workspace.getConfiguration("grokBridge").get("nodePath"), (l) => log.appendLine(l));
+      await ensureSdkWithProgress(ctx, node.path, log, true);
+    } catch (e) { reportError(e, log); }
   }));
 }
 function deactivate() {}

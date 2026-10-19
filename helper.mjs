@@ -9,12 +9,26 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-// Uses the bundled @cursor/sdk. GROK_BRIDGE_SDK_DIR (setting grokBridge.sdkDir) optionally points at
-// another folder whose node_modules contains @cursor/sdk, e.g. to test a newer SDK version.
+// GROK_BRIDGE_SDK_DIR is a folder whose node_modules contains @cursor/sdk: the extension's own install
+// in globalStorage, or the grokBridge.sdkDir override. Falls back to normal resolution for dev use.
+import { readFileSync } from "node:fs";
 const SDK_DIR = process.env.GROK_BRIDGE_SDK_DIR || "";
-const sdkEntry = SDK_DIR ? path.join(SDK_DIR, "node_modules/@cursor/sdk/dist/esm/index.js") : "";
-const useOverride = sdkEntry && existsSync(sdkEntry);
-const { Agent } = await import(useOverride ? pathToFileURL(sdkEntry).href : "@cursor/sdk");
+function sdkEntry(dir) {
+  const pkgDir = path.join(dir, "node_modules", "@cursor", "sdk");
+  try {
+    const pkg = JSON.parse(readFileSync(path.join(pkgDir, "package.json"), "utf8"));
+    const exp = pkg.exports?.["."];
+    const rel = (typeof exp === "string" ? exp : exp?.import || exp?.default) || pkg.module || "dist/esm/index.js";
+    return { file: path.join(pkgDir, rel), version: pkg.version };
+  } catch { return null; }
+}
+const entry = SDK_DIR ? sdkEntry(SDK_DIR) : null;
+if (SDK_DIR && (!entry || !existsSync(entry.file))) {
+  process.stdout.write(JSON.stringify({ id: null, type: "fatal", error: `@cursor/sdk not found under ${SDK_DIR}` }) + "\n");
+  process.exit(3);
+}
+const { Agent } = await import(entry ? pathToFileURL(entry.file).href : "@cursor/sdk");
+const SDK_INFO = entry ? `${entry.version} @ ${SDK_DIR}` : "node resolution";
 
 const out = (o) => process.stdout.write(JSON.stringify(o) + "\n");
 
@@ -61,7 +75,7 @@ function normalize(messages) {
 async function handle(req) {
   const { id, cmd } = req;
   const cwd = req.cwd || process.cwd();
-  if (cmd === "ping") return out({ id, type: "result", data: { node: process.version, sdk: useOverride ? sdkEntry : "bundled" } });
+  if (cmd === "ping") return out({ id, type: "result", data: { node: process.version, sdk: SDK_INFO } });
   if (cmd === "list") {
     const r = await Agent.list({ runtime: "local", cwd });
     const items = (r.items || []).map((a) => ({ agentId: a.agentId, name: a.name, summary: a.summary, lastModified: a.lastModified, createdAt: a.createdAt, status: a.status }));

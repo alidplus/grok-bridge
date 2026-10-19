@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Syntax check
+        run: |
+          node --check extension.js
+          node --check sdk-installer.js
+          node --check helper.mjs
+          node --check media/panel.js
+      - run: npx @vscode/vsce package -o grok-bridge.vsix
+      - uses: actions/upload-artifact@v4
+        with:
+          name: grok-bridge-vsix
+          path: grok-bridge.vsix
+          if-no-files-found: error

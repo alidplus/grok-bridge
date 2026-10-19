@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.1 — 2026-10-19
+
+- **Cross-platform:** `@cursor/sdk` is no longer bundled. On first use, or when the SDK is missing or outdated, a pinned
+  version (1.0.38) is installed into the extension's global storage with the npm of the detected Node, and a progress notification is shown.
+  The vsix is now small and contains no platform-specific binaries.
+- New command **Grok Bridge: Reinstall SDK**.
+- Clearer errors when no Node >= 22.13 is found, when `grokBridge.nodePath` is invalid, or when the npm install fails.
+- Node detection now also checks fnm on macOS and the Windows install locations (Program Files, nvm-windows).
+- Publisher set to `alidplus`; added repository, bugs and homepage links (github.com/alidplus/grok-bridge).
+- Added CI (package and upload the vsix) and Open VSX Trusted Publishing workflows, plus PUBLISHING.md.
+
 ## 0.1.0 — 2026-10-19
 
 - First release as **Grok Bridge**, rebranded from the internal "SDK Agents" prototype.

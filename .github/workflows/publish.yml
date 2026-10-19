@@ -1,0 +1,45 @@
+name: Publish to Open VSX
+
+# Trusted Publishing: no Open VSX token is stored here. The job proves its identity with a
+# GitHub OIDC token. The registration on open-vsx.org must match owner alidplus,
+# repo grok-bridge, workflow publish.yml and environment publish.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: publish
+    permissions:
+      contents: write   # only for attaching the vsix to the GitHub release
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Check tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          v="$(node -p 'require("./package.json").version')"
+          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME} != package.json v$v"; exit 1; }
+      - run: npx @vscode/vsce package -o grok-bridge.vsix
+      - run: npx ovsx publish grok-bridge.vsix --trusted-publishing
+      - name: Attach vsix to GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="$(node -p 'require("./package.json").version')"
+          cp grok-bridge.vsix "grok-bridge-$v.vsix"
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" "grok-bridge-$v.vsix" --clobber

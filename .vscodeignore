@@ -1,8 +1,10 @@
 .git/**
+.github/**
 .gitignore
 *.vsix
 **/*.log
+node_modules/**
+test/**
+.test-storage/**
+PUBLISHING.md
 media/icon-512.png
-node_modules/**/*.map
-node_modules/**/*.d.ts
-node_modules/**/*.d.ts.map
