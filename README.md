@@ -11,14 +11,56 @@ SDK agents don't appear in Cursor's own agents history pane. Grok Bridge fills t
 
 ## Features
 
-- **Agents list:** every local SDK agent for a folder, with name, status, id and last-modified time.
-- **Conversation view:** click an agent to read its turns: your prompts, assistant text, thinking and tool calls.
-- **Prompt box:** start a **new agent** or **continue** the selected one. Assistant text and
-  `[tool] name status` lines stream into the panel live, and the list refreshes when the run ends.
-- **Grok by default:** new prompts use `grok-4.5`. You can change it per prompt or in settings.
+- **Cursor-style chat:** a top bar with the agent title, **+** for a new agent and a **history** button.
+  Your prompts appear as bubbles, replies render as markdown (code, lists, tables, links), tool calls and
+  thinking fold into one collapsed line, and each turn shows **Worked for Xs**.
+- **Composer:** Enter sends, Shift+Enter adds a line, the model pill picks the model (Grok models first,
+  `grok-4.5` by default), and the send button becomes **Stop** while the agent works.
+- **History:** every local SDK agent for a folder, newest first, with a live marker on running agents.
+- **MCP server for Grok Bots:** a small local MCP endpoint lets a Grok Bot list, start, prompt, read and cancel
+  Cursor agents. Runs a bot starts stream into the panel live, just like your own.
 - **Activity Bar view** plus the **Grok Bridge: Open** command, which opens the panel as an editor tab.
-- **Small and cross-platform:** the extension ships no binaries. On first use it installs a pinned
-  `@cursor/sdk` into its own storage folder with your Node's npm. **Grok Bridge: Reinstall SDK** repairs that install.
+- **Small and cross-platform:** the extension ships no binaries and has no runtime npm dependencies. On first use it
+  installs a pinned `@cursor/sdk` into its own storage folder with your Node's npm. **Grok Bridge: Reinstall SDK** repairs that install.
+
+## MCP for Grok Bots
+
+Grok Bridge runs an MCP server (Streamable HTTP, JSON responses) on `http://127.0.0.1:7457/mcp`. It listens on
+localhost only and every request needs a bearer token. Run **Grok Bridge: Copy MCP Config** and give the result to your bot:
+
+```json
+{
+  "mcpServers": {
+    "grok-bridge": {
+      "url": "http://127.0.0.1:7457/mcp",
+      "headers": { "Authorization": "Bearer <token>" }
+    }
+  }
+}
+```
+
+The same config is written to `<globalStorage>/alidplus.grok-bridge/mcp.json` (readable only by you), so local scripts can find it.
+**Grok Bridge: Regenerate MCP Token** replaces the token; old configs stop working.
+
+| Tool | Arguments | What it does |
+| --- | --- | --- |
+| `list_agents` | `cwd?` | Agents for a folder, with `running` flags. |
+| `create_agent` | `prompt`, `model?`, `cwd?`, `wait?`, `timeout_s?` | Starts a new agent. With `wait` (default) it returns the final reply. |
+| `send_prompt` | `agent_id`, `prompt`, `wait?`, `timeout_s?`, `model?` | Continues an agent's conversation. |
+| `get_messages` | `agent_id` | The conversation as plain text: prompts, replies and tool steps. |
+| `cancel_run` | `agent_id` | Stops the agent's current run. |
+
+A run that outlasts `timeout_s` (600 by default) keeps going; the tool returns `"status": "running"`, and the bot can poll
+`get_messages`. Quick check with curl:
+
+```bash
+curl -s http://127.0.0.1:7457/mcp -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+The server lives in the Cursor window that started first. Another window that finds the port taken shows that in the
+history view, and you can pick a different `grokBridge.mcpPort`. A bot on another machine can't reach `127.0.0.1`;
+it needs to run on the same computer or use a tunnel you control.
 
 ## Requirements
 
@@ -34,7 +76,7 @@ SDK agents don't appear in Cursor's own agents history pane. Grok Bridge fills t
 
 1. Install the extension from a `.vsix` file:
    ```bash
-   cursor --install-extension grok-bridge-0.1.1.vsix
+   cursor --install-extension grok-bridge-0.2.0.vsix
    ```
 2. Log in to the Cursor SDK once, if you haven't already:
    ```bash
@@ -53,14 +95,17 @@ SDK agents don't appear in Cursor's own agents history pane. Grok Bridge fills t
 | `grokBridge.nodePath` | *(auto)* | Node >= 22.13 binary. Leave empty to auto-detect it from PATH, nvm, fnm, volta or Homebrew. |
 | `grokBridge.defaultModel` | `grok-4.5` | Model for new prompts. |
 | `grokBridge.cwd` | *(workspace)* | Override the agents' working folder. |
+| `grokBridge.mcpEnabled` | `true` | Run the local MCP server. |
+| `grokBridge.mcpPort` | `7457` | MCP server port (binds to 127.0.0.1). |
 | `grokBridge.sdkDir` | *(managed)* | Optional folder whose `node_modules` contains a different `@cursor/sdk`. When it's empty, Grok Bridge uses the SDK it installed itself. |
 
 ## Usage
 
 1. Click the **Grok Bridge** icon in the Activity Bar, or run **Grok Bridge: Open**.
-2. The **cwd** box shows the current folder. Change it and press Enter, or press ⟳, to list agents for another folder.
-3. Click an agent to read its conversation.
-4. Type a prompt, choose **New agent** or **Continue selected**, then press **Send** (or Ctrl/Cmd+Enter).
+2. Type in the box at the bottom and press **Enter** to start a new agent in the workspace folder.
+   Keep typing in the same chat to continue that agent.
+3. Press the **history** (clock) button to see the folder's agents. Click one to open it. Change the **Folder** field and press Enter to list another folder.
+4. Press **+** for a fresh agent. Press the round button (it turns into a square) to stop a running agent.
 
 Logs and errors go to the **Grok Bridge** output channel (View → Output).
 
@@ -74,15 +119,25 @@ changes with git before you commit or push. Usage is billed to your Cursor accou
 
 `sdk-installer.js` finds Node >= 22.13 and installs the pinned `@cursor/sdk` into the extension's global storage
 (`<globalStorage>/alidplus.grok-bridge/sdk`). It installs into a temporary folder first and swaps it in, so a failed install
-never leaves a broken SDK behind. `extension.js` then starts `helper.mjs` on that Node. The two talk in JSON lines over stdio. The helper
-calls `@cursor/sdk` (`Agent.list`, `Agent.messages.list`, `Agent.create`/`Agent.resume` + `send`/`stream`)
-and streams events back to the webview.
+never leaves a broken SDK behind. `extension.js` then starts `helper.mjs` on that Node. The two talk in JSON lines over stdio, and the helper
+calls `@cursor/sdk` (`Agent.list`, `Agent.messages.list`, `Agent.create`/`Agent.resume` + `send`/`stream`, `run.cancel`).
+
+Every run, whether it came from the panel or from MCP, goes through one hub in `extension.js` that streams its events to all open panels.
+`mcp.js` is a hand-written MCP server (about 150 lines, Node's `http` only) that maps the tools above onto that hub.
+
+```
+Grok Bot ──MCP/HTTP──▶ mcp.js ─┐
+                               ├─▶ hub (extension.js) ──JSON lines──▶ helper.mjs ──▶ @cursor/sdk ──▶ local agent
+Panel (webview) ──postMessage──┘          └── live events ──▶ every open panel
+```
 
 ## Development
 
 ```bash
 npm ci
 node test/install-sdk.mjs --cwd /path/to/a/folder   # real SDK install into Cursor's globalStorage, then list agents
+node test/host.js --cwd /path/to/a/folder           # run extension.js outside Cursor (fake vscode) to test MCP with curl
+node test/preview.mjs chat                          # write .test-storage/preview-chat.html to look at the panel in a browser
 npx @vscode/vsce package                            # build the .vsix
 ```
 

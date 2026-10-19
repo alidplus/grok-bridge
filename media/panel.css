@@ -1,0 +1,144 @@
+/* Grok Bridge panel. Everything comes from the VS Code theme, so it fits light, dark and high-contrast themes. */
+:root {
+  --fg: var(--vscode-foreground);
+  --muted: var(--vscode-descriptionForeground, rgba(128, 128, 128, .9));
+  --border: var(--vscode-widget-border, var(--vscode-panel-border, rgba(128, 128, 128, .28)));
+  --field: var(--vscode-input-background, rgba(128, 128, 128, .08));
+  --field-border: var(--vscode-input-border, var(--border));
+  --hover: var(--vscode-toolbar-hoverBackground, rgba(128, 128, 128, .15));
+  --focus: var(--vscode-focusBorder);
+  --link: var(--vscode-textLink-foreground);
+  --code-bg: var(--vscode-textCodeBlock-background, rgba(128, 128, 128, .12));
+  --mono: var(--vscode-editor-font-family, ui-monospace, "SF Mono", Menlo, Consolas, monospace);
+  --radius: 8px;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0; padding: 0;
+  display: flex; flex-direction: column;
+  color: var(--fg);
+  font-family: var(--vscode-font-family, system-ui), system-ui, "Inter", -apple-system, "Segoe UI", Ubuntu, sans-serif;
+  font-size: 13px; line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+[hidden] { display: none !important; }
+button { font: inherit; color: inherit; }
+svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.muted { color: var(--muted); }
+:focus-visible { outline: 1px solid var(--focus); outline-offset: 1px; }
+
+/* top bar */
+.bar { display: flex; align-items: center; gap: 2px; height: 34px; padding: 0 6px 0 12px; flex: none; border-bottom: 1px solid var(--border); }
+.title { flex: 1; min-width: 0; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.icon { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: 5px; background: none; color: var(--muted); cursor: pointer; }
+.icon:hover { background: var(--hover); color: var(--fg); }
+.icon.on { color: var(--fg); background: var(--hover); }
+#back { margin-left: -6px; }
+.live-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--vscode-charts-green, #3fb950); margin: 0 6px; }
+
+/* views */
+.view { flex: 1; min-height: 0; overflow-y: auto; position: relative; }
+.conv { padding: 12px 14px 8px; max-width: 760px; margin: 0 auto; }
+
+/* empty state */
+.empty { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; padding: 24px 22px; max-width: 420px; margin: 0 auto; color: var(--muted); pointer-events: none; }
+.empty p { margin: 4px 0; }
+.empty-title { color: var(--fg); font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+.empty code { pointer-events: auto; }
+
+/* turns */
+.turn { margin-bottom: 18px; }
+.turn + .turn { padding-top: 4px; }
+.user { border: 1px solid var(--field-border); background: var(--field); border-radius: var(--radius); padding: 8px 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.source { font-size: 11px; color: var(--muted); margin: 0 0 4px 2px; }
+.meta { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; margin: 10px 0 6px 1px; }
+.meta.err { color: var(--vscode-errorForeground); }
+.spinner { width: 11px; height: 11px; border-radius: 50%; border: 1.5px solid currentColor; border-right-color: transparent; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; border-right-color: currentColor; opacity: .6; } }
+
+/* assistant markdown */
+.md { overflow-wrap: anywhere; }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p, .md ul, .md ol, .md pre, .md blockquote, .md table { margin: 0 0 10px; }
+.md ul, .md ol { padding-left: 20px; }
+.md li { margin: 2px 0; }
+.md li > ul, .md li > ol { margin: 2px 0; }
+.md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { font-size: 13px; font-weight: 600; margin: 14px 0 6px; }
+.md h1 { font-size: 15px; } .md h2 { font-size: 14px; }
+.md-inline a { color: var(--link); text-decoration: none; }
+.md a { color: var(--link); text-decoration: none; } .md a:hover { text-decoration: underline; }
+.md code, .md-inline code { font-family: var(--mono); font-size: 12px; background: var(--code-bg); padding: 1px 4px; border-radius: 4px; }
+.md pre { background: var(--code-bg); border-radius: 6px; padding: 8px 10px; overflow-x: auto; position: relative; }
+.md pre code { background: none; padding: 0; font-size: 12px; line-height: 1.5; white-space: pre; }
+.md pre[data-lang] { padding-top: 20px; }
+.md pre[data-lang]::before { content: attr(data-lang); position: absolute; top: 4px; left: 10px; font-size: 10px; color: var(--muted); font-family: inherit; }
+.md blockquote { border-left: 2px solid var(--border); margin-left: 0; padding: 0 0 0 10px; color: var(--muted); }
+.md hr { border: 0; border-top: 1px solid var(--border); margin: 12px 0; }
+.md table { border-collapse: collapse; display: block; overflow-x: auto; }
+.md th, .md td { border: 1px solid var(--border); padding: 3px 8px; text-align: left; }
+.md .link { color: var(--link); }
+.md + .md { margin-top: 10px; }
+
+/* collapsed tool / thinking steps */
+.steps { margin: 6px 0 10px; color: var(--muted); font-size: 12px; }
+.steps summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 5px; padding: 1px 4px 1px 2px; border-radius: 4px; max-width: 100%; }
+.steps summary::-webkit-details-marker { display: none; }
+.steps summary:hover { color: var(--fg); background: var(--hover); }
+.steps summary .chev { width: 12px; height: 12px; transition: transform .12s; flex: none; }
+.steps[open] summary .chev { transform: rotate(90deg); }
+.steps .sum { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.steps ul { list-style: none; margin: 4px 0 2px 8px; padding: 0 0 0 10px; border-left: 1px solid var(--border); }
+.steps li { display: flex; gap: 6px; padding: 1px 0; min-width: 0; }
+.steps li .n { color: var(--fg); flex: none; }
+.steps li .d { font-family: var(--mono); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.steps li.think .d { font-family: inherit; font-style: italic; white-space: normal; }
+.steps li .st { flex: none; margin-left: auto; padding-left: 6px; }
+.steps li.error .st { color: var(--vscode-errorForeground); }
+
+.error-box { border: 1px solid var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground)); background: var(--vscode-inputValidation-errorBackground, transparent); border-radius: 6px; padding: 6px 9px; margin: 8px 0; overflow-wrap: anywhere; }
+
+/* history */
+.field { display: flex; align-items: center; gap: 8px; padding: 10px 12px 6px; color: var(--muted); font-size: 12px; }
+.field input { flex: 1; min-width: 0; font: 12px var(--mono); color: var(--vscode-input-foreground, var(--fg)); background: var(--field); border: 1px solid var(--field-border); border-radius: 5px; padding: 4px 7px; }
+.field input:focus { outline: none; border-color: var(--focus); }
+.list { padding: 2px 6px 12px; }
+.item { display: block; width: 100%; text-align: left; border: 0; background: none; border-radius: 6px; padding: 7px 8px; cursor: pointer; }
+.item:hover { background: var(--hover); }
+.item.sel { background: var(--vscode-list-inactiveSelectionBackground, var(--hover)); }
+.item-top { display: flex; gap: 8px; align-items: baseline; }
+.item-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.item-time { flex: none; color: var(--muted); font-size: 11.5px; }
+.item-sub { color: var(--muted); font-size: 11.5px; display: flex; gap: 6px; align-items: center; }
+.item-sub .run { color: var(--vscode-charts-green, #3fb950); }
+.list .msg { padding: 18px 8px; color: var(--muted); }
+.mcp { padding: 8px 14px 12px; color: var(--muted); font-size: 11.5px; border-top: 1px solid var(--border); }
+.mcp button { border: 0; background: none; color: var(--link); padding: 0; cursor: pointer; font-size: inherit; }
+.mcp .bad { color: var(--vscode-errorForeground); }
+
+/* notice */
+.notice { margin: 0 10px 6px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; display: flex; gap: 8px; align-items: center; }
+.notice span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.notice button { border: 0; background: none; color: var(--link); cursor: pointer; padding: 0; font-size: inherit; }
+
+/* composer */
+.composer { flex: none; margin: 4px 10px 10px; border: 1px solid var(--field-border); background: var(--field); border-radius: 10px; padding: 8px 8px 6px 11px; }
+.composer:focus-within { border-color: var(--focus); }
+.composer textarea { display: block; width: 100%; resize: none; border: 0; outline: none; background: none; color: var(--vscode-input-foreground, var(--fg)); font: inherit; line-height: 1.5; padding: 0; min-height: 40px; max-height: 220px; }
+.composer textarea::placeholder { color: var(--vscode-input-placeholderForeground, var(--muted)); }
+.composer-row { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.pill { position: relative; display: inline-flex; align-items: center; border-radius: 999px; color: var(--muted); }
+.pill:hover { background: var(--hover); color: var(--fg); }
+.pill select { field-sizing: content; appearance: none; -webkit-appearance: none; border: 0; background: none; color: inherit; font: inherit; font-size: 12px; padding: 2px 20px 2px 8px; cursor: pointer; max-width: 170px; text-overflow: ellipsis; }
+.pill select option { color: var(--vscode-dropdown-foreground, var(--fg)); background: var(--vscode-dropdown-background); }
+.pill svg { position: absolute; right: 5px; width: 12px; height: 12px; pointer-events: none; }
+.hint { flex: 1; min-width: 0; color: var(--muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
+.send { display: grid; place-items: center; width: 24px; height: 24px; border: 0; border-radius: 50%; padding: 0; cursor: pointer; background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+.send:hover { background: var(--vscode-button-hoverBackground, var(--vscode-button-background)); }
+.send:disabled { opacity: .35; cursor: default; }
+.send svg { width: 14px; height: 14px; stroke-width: 1.8; }
+.send .i-stop { display: none; fill: currentColor; stroke: none; }
+.send.stop .i-send { display: none; }
+.send.stop .i-stop { display: block; }

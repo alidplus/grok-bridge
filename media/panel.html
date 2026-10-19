@@ -1,29 +1,54 @@
 <!DOCTYPE html>
-<html><head><meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{csp}} 'unsafe-inline'; script-src 'nonce-{{nonce}}';">
-<style>
- body{font-family:var(--vscode-font-family);font-size:var(--vscode-font-size);color:var(--vscode-foreground);padding:6px}
- input,textarea,select{width:100%;box-sizing:border-box;background:var(--vscode-input-background);color:var(--vscode-input-foreground);border:1px solid var(--vscode-input-border,#555);padding:3px}
- button{background:var(--vscode-button-background);color:var(--vscode-button-foreground);border:0;padding:4px 8px;cursor:pointer;margin:2px 2px 2px 0}
- button:disabled{opacity:.5}
- .row{display:flex;gap:4px;align-items:center;margin:4px 0}
- .agent{padding:4px;border-bottom:1px solid var(--vscode-panel-border,#333);cursor:pointer}
- .agent:hover,.agent.sel{background:var(--vscode-list-hoverBackground)}
- .muted{opacity:.7;font-size:90%}
- #list{max-height:30vh;overflow:auto}
- #conv{white-space:pre-wrap;font-family:var(--vscode-editor-font-family);font-size:90%;border-top:1px solid #444;margin-top:6px;padding-top:4px}
- .user{color:var(--vscode-textLink-foreground);font-weight:bold;margin-top:8px}
- .tool{opacity:.75}.think{opacity:.55;font-style:italic}.err{color:var(--vscode-errorForeground)}
-</style></head>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src {{csp}} https: data:; style-src {{csp}}; script-src 'nonce-{{nonce}}';">
+<link rel="stylesheet" href="{{style}}">
+</head>
 <body>
- <div class="muted" style="font-weight:bold">Grok Bridge</div>
- <div class="muted">cwd</div>
- <div class="row"><input id="cwd"><button id="refresh" title="Refresh">⟳</button></div>
- <div id="list"><span class="muted">loading…</span></div>
- <div class="row"><select id="mode"><option value="new">New agent</option><option value="continue">Continue selected</option></select>
-   <input id="model" style="width:40%" title="model id"></div>
- <textarea id="prompt" rows="3" placeholder="Prompt… (Ctrl+Enter to send)"></textarea>
- <div class="row"><button id="send">Send</button><span id="status" class="muted"></span></div>
- <div id="conv"></div>
- <script nonce="{{nonce}}" src="{{script}}"></script>
+<header class="bar">
+  <button id="back" class="icon" title="Back to chat" aria-label="Back to chat" hidden>
+    <svg viewBox="0 0 16 16"><path d="M10 3 5 8l5 5" /></svg></button>
+  <div id="title" class="title">New Agent</div>
+  <span id="liveDot" class="live-dot" title="Running" hidden></span>
+  <button id="new" class="icon" title="New agent" aria-label="New agent">
+    <svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" /></svg></button>
+  <button id="history" class="icon" title="History" aria-label="History">
+    <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5" /><path d="M8 5v3.2l2 1.3" /></svg></button>
+</header>
+
+<main id="chat" class="view">
+  <div id="conv" class="conv" aria-live="polite"></div>
+  <div id="empty" class="empty">
+    <div class="empty-title">Start a Cursor agent</div>
+    <p>It works in <code id="emptyCwd">this folder</code> with full file and terminal access.</p>
+    <p class="muted">Grok Bots can drive agents too, over MCP. Their runs show up here live.</p>
+  </div>
+</main>
+
+<main id="historyView" class="view" hidden>
+  <label class="field">
+    <span>Folder</span>
+    <input id="cwd" spellcheck="false" title="Agents are listed per folder. Press Enter to reload.">
+  </label>
+  <div id="list" class="list"></div>
+  <footer class="mcp" id="mcp"></footer>
+</main>
+
+<div id="notice" class="notice" hidden></div>
+
+<form id="composer" class="composer">
+  <textarea id="prompt" rows="1" placeholder="Ask the agent to build, fix or explain…" aria-label="Prompt"></textarea>
+  <div class="composer-row">
+    <label class="pill" title="Model for the next message">
+      <select id="model" aria-label="Model"></select>
+      <svg viewBox="0 0 16 16"><path d="m4.5 6.5 3.5 3.5 3.5-3.5" /></svg>
+    </label>
+    <span id="hint" class="hint"></span>
+    <button id="send" class="send" type="submit" title="Send (Enter)" aria-label="Send" disabled>
+      <svg class="i-send" viewBox="0 0 16 16"><path d="M8 13V3.5M3.8 7.5 8 3.3l4.2 4.2" /></svg>
+      <svg class="i-stop" viewBox="0 0 16 16"><rect x="4.5" y="4.5" width="7" height="7" rx="1.2" /></svg>
+    </button>
+  </div>
+</form>
+<script nonce="{{nonce}}" src="{{script}}"></script>
 </body></html>

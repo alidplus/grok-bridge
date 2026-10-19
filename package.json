@@ -1,8 +1,8 @@
 {
   "name": "grok-bridge",
   "displayName": "Grok Bridge",
-  "description": "Unofficial community bridge between Grok Bots and Cursor agents: watch, read and steer Cursor SDK agents from inside Cursor.",
-  "version": "0.1.1",
+  "description": "Unofficial community bridge between Grok Bots and Cursor agents: chat with Cursor SDK agents in a Cursor-style panel, and let Grok Bots drive them over MCP.",
+  "version": "0.2.0",
   "publisher": "alidplus",
   "license": "MIT",
   "repository": {
@@ -22,7 +22,8 @@
     "grok",
     "cursor",
     "agents",
-    "sdk"
+    "sdk",
+    "mcp"
   ],
   "engines": {
     "vscode": "^1.80.0"
@@ -36,6 +37,14 @@
       {
         "command": "grokBridge.open",
         "title": "Grok Bridge: Open"
+      },
+      {
+        "command": "grokBridge.copyMcpConfig",
+        "title": "Grok Bridge: Copy MCP Config"
+      },
+      {
+        "command": "grokBridge.regenerateMcpToken",
+        "title": "Grok Bridge: Regenerate MCP Token"
       },
       {
         "command": "grokBridge.reinstallSdk",
@@ -56,7 +65,7 @@
         {
           "type": "webview",
           "id": "grokBridge.view",
-          "name": "Agents"
+          "name": "Chat"
         }
       ]
     },
@@ -82,8 +91,34 @@
           "type": "string",
           "default": "grok-4.5",
           "description": "Model id used for new prompts."
+        },
+        "grokBridge.mcpEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run the local MCP server so Grok Bots can drive Cursor agents (http://127.0.0.1:<mcpPort>/mcp, bearer token)."
+        },
+        "grokBridge.mcpPort": {
+          "type": "number",
+          "default": 7457,
+          "minimum": 1024,
+          "maximum": 65535,
+          "description": "Port of the local MCP server. It binds to 127.0.0.1 only."
         }
       }
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "grokBridge.copyMcpConfig",
+          "when": "view == grokBridge.view",
+          "group": "9_mcp@1"
+        },
+        {
+          "command": "grokBridge.open",
+          "when": "view == grokBridge.view",
+          "group": "1_open@1"
+        }
+      ]
     }
   },
   "scripts": {

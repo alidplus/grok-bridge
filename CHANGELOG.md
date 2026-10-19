@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.0 — 2026-10-19
+
+- **MCP server for Grok Bots.** A hand-written MCP endpoint (Streamable HTTP, JSON responses, no new dependencies) on
+  `http://127.0.0.1:7457/mcp` with a bearer token. It offers the tools `list_agents`, `create_agent`, `send_prompt`, `get_messages` and `cancel_run`.
+  New commands: **Copy MCP Config** and **Regenerate MCP Token**. New settings: `grokBridge.mcpEnabled` and `grokBridge.mcpPort`.
+- **Runs from any source show live.** One hub streams every run, from the panel or from MCP, to all open panels.
+  When a bot starts a run, the panel follows it in a fresh chat, or shows a notice with a **View** button.
+- **New chat UI, modeled on Cursor's agent chat.** It has a top bar (title, new, history), prompt bubbles, markdown replies,
+  collapsed tool and thinking steps, **Worked for Xs**, a composer with a model pill and send/stop, empty states and inline errors.
+  Fonts come from the editor theme: the UI font at 13px for text and the editor font for code.
+- Helper: `cancel` and `models` commands, thinking, status and tool-detail events, per-turn durations, and running flags in the list.
+- Dev tools: `test/host.js` runs the extension outside Cursor for curl tests, and `test/preview.mjs` renders the panel in a browser.
+
 ## 0.1.1 — 2026-10-19
 
 - **Cross-platform:** `@cursor/sdk` is no longer bundled. On first use, or when the SDK is missing or outdated, a pinned
