@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{csp}} 'unsafe-inline'; script-src 'nonce-{{nonce}}';">
+<style>
+ body{font-family:var(--vscode-font-family);font-size:var(--vscode-font-size);color:var(--vscode-foreground);padding:6px}
+ input,textarea,select{width:100%;box-sizing:border-box;background:var(--vscode-input-background);color:var(--vscode-input-foreground);border:1px solid var(--vscode-input-border,#555);padding:3px}
+ button{background:var(--vscode-button-background);color:var(--vscode-button-foreground);border:0;padding:4px 8px;cursor:pointer;margin:2px 2px 2px 0}
+ button:disabled{opacity:.5}
+ .row{display:flex;gap:4px;align-items:center;margin:4px 0}
+ .agent{padding:4px;border-bottom:1px solid var(--vscode-panel-border,#333);cursor:pointer}
+ .agent:hover,.agent.sel{background:var(--vscode-list-hoverBackground)}
+ .muted{opacity:.7;font-size:90%}
+ #list{max-height:30vh;overflow:auto}
+ #conv{white-space:pre-wrap;font-family:var(--vscode-editor-font-family);font-size:90%;border-top:1px solid #444;margin-top:6px;padding-top:4px}
+ .user{color:var(--vscode-textLink-foreground);font-weight:bold;margin-top:8px}
+ .tool{opacity:.75}.think{opacity:.55;font-style:italic}.err{color:var(--vscode-errorForeground)}
+</style></head>
+<body>
+ <div class="muted" style="font-weight:bold">Grok Bridge</div>
+ <div class="muted">cwd</div>
+ <div class="row"><input id="cwd"><button id="refresh" title="Refresh">⟳</button></div>
+ <div id="list"><span class="muted">loading…</span></div>
+ <div class="row"><select id="mode"><option value="new">New agent</option><option value="continue">Continue selected</option></select>
+   <input id="model" style="width:40%" title="model id"></div>
+ <textarea id="prompt" rows="3" placeholder="Prompt… (Ctrl+Enter to send)"></textarea>
+ <div class="row"><button id="send">Send</button><span id="status" class="muted"></span></div>
+ <div id="conv"></div>
+ <script nonce="{{nonce}}" src="{{script}}"></script>
+</body></html>

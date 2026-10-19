@@ -1,0 +1,35 @@
+{
+  "name": "grok-bridge",
+  "displayName": "Grok Bridge",
+  "description": "Unofficial community bridge between Grok Bots and Cursor agents: watch, read and steer Cursor SDK agents from inside Cursor.",
+  "version": "0.1.0",
+  "publisher": "grok-bridge",
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "categories": ["AI", "Other"],
+  "keywords": ["grok", "cursor", "agents", "sdk"],
+  "engines": { "vscode": "^1.80.0" },
+  "main": "./extension.js",
+  "activationEvents": ["onStartupFinished"],
+  "contributes": {
+    "commands": [{ "command": "grokBridge.open", "title": "Grok Bridge: Open" }],
+    "viewsContainers": { "activitybar": [{ "id": "grokBridge", "title": "Grok Bridge", "icon": "media/icon.svg" }] },
+    "views": { "grokBridge": [{ "type": "webview", "id": "grokBridge.view", "name": "Agents" }] },
+    "configuration": {
+      "title": "Grok Bridge",
+      "properties": {
+        "grokBridge.nodePath": { "type": "string", "default": "", "description": "Path to a Node.js >= 22.13 binary used to run the SDK helper. Empty = auto-detect (PATH, nvm, fnm, volta, Homebrew)." },
+        "grokBridge.sdkDir": { "type": "string", "default": "", "description": "Optional override: a folder whose node_modules contains @cursor/sdk. Empty = use the bundled SDK." },
+        "grokBridge.cwd": { "type": "string", "default": "", "description": "Optional override for the agents' working directory. Empty = first workspace folder." },
+        "grokBridge.defaultModel": { "type": "string", "default": "grok-4.5", "description": "Model id used for new prompts." }
+      }
+    }
+  },
+  "scripts": {
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "@cursor/sdk": "^1.0.38"
+  },
+  "devDependencies": {}
+}
